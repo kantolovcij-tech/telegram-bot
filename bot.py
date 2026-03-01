@@ -420,7 +420,7 @@ async def a_users(call: CallbackQuery):
     txt = "👥 **Пользователи**\n"
     for u in users:
         txt += f"`{u[0]}` @{u[1]} | ${u[2]:.2f} | {'✅' if u[3] else '❌'}\n"
-    await call.message.edit_text(txt, parse_mode="Markdown", reply_markup=kb_back())
+    await call.message.edit_text(txt, parse_mode="HTML", reply_markup=kb_back())
 
 @dp.callback_query(F.data == "a_balance")
 async def a_balance_start(call: CallbackQuery, state: FSMContext):
