@@ -7,7 +7,7 @@ import time
 import requests
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -127,7 +127,7 @@ def kb_main(uid):
     user = get_user(uid)
     bal = f"💰 ${user[2]:.2f}" if user else "💰 Баланс"
     btns = []
-    if uid in ADMIN_IDS:  # ИСПРАВЛЕНО: теперь проверка через список
+    if uid in ADMIN_IDS:
         btns = [[InlineKeyboardButton(text="📋 Сделки", callback_data="deals")],
                 [InlineKeyboardButton(text=bal, callback_data="balance")],
                 [InlineKeyboardButton(text="⚙️ Админ", callback_data="admin")]]
@@ -153,11 +153,37 @@ def kb_deal(deal_id, status, role):
 def kb_back():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back")]])
 
+def kb_admin_panel():
+    """Клавиатура для админ-панели"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Юзеры", callback_data="a_users")],
+        [InlineKeyboardButton(text="💰 Накрутка", callback_data="a_balance")],
+        [InlineKeyboardButton(text="📋 Выводы", callback_data="a_withdraws")],
+        [InlineKeyboardButton(text="📊 Стата", callback_data="a_stats")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back")]
+    ])
+
+# ==================== КОМАНДА /ADMIN (НОВАЯ) ====================
+@dp.message(Command('admin'))
+async def admin_command(msg: Message):
+    """Открывает админ-панель по команде /admin"""
+    if msg.from_user.id in ADMIN_IDS:
+        await msg.answer(
+            "⚙️ **Админ-панель**\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "Выберите действие:",
+            parse_mode="Markdown",
+            reply_markup=kb_admin_panel()
+        )
+    else:
+        await msg.answer("❌ У вас нет доступа к админ-панели.")
+# ================================================================
+
 # ==================== СТАРТ ====================
 @dp.message(CommandStart())
 async def start(msg: Message):
     create_user(msg.from_user.id, msg.from_user.username or "no_name")
-    is_admin = " Админ" if msg.from_user.id in ADMIN_IDS else ""  # ИСПРАВЛЕНО
+    is_admin = " Админ" if msg.from_user.id in ADMIN_IDS else ""
     await msg.answer(f"👋 Добро пожаловать{is_admin}!", reply_markup=kb_main(msg.from_user.id))
 
 @dp.callback_query(F.data == "back")
@@ -215,7 +241,7 @@ async def sell_amount(msg: Message, state: FSMContext):
 # ==================== ПОКУПАТЕЛЬ (АДМИНЫ) ====================
 @dp.callback_query(F.data.startswith("pay_"))
 async def pay_deal(call: CallbackQuery):
-    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+    if call.from_user.id not in ADMIN_IDS:
         return await call.answer("❌ Нет доступа", show_alert=True)
     deal_id = call.data[4:]
     deal = get_deal(deal_id)
@@ -243,7 +269,7 @@ async def send_deal(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("done_"))
 async def done_deal(call: CallbackQuery):
-    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+    if call.from_user.id not in ADMIN_IDS:
         return await call.answer("❌ Нет доступа", show_alert=True)
     deal_id = call.data[5:]
     deal = get_deal(deal_id)
@@ -259,11 +285,11 @@ async def cancel_deal(call: CallbackQuery):
     deal_id = call.data[7:]
     deal = get_deal(deal_id)
     if not deal: return await call.answer("❌ Ошибка", show_alert=True)
-    if call.from_user.id != deal[1] and call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+    if call.from_user.id != deal[1] and call.from_user.id not in ADMIN_IDS:
         return
     update_deal(deal_id, "cancelled")
     await call.message.edit_text(f"❌ Сделка отменена\nID: {deal_id}", reply_markup=kb_main(call.from_user.id))
-    if call.from_user.id in ADMIN_IDS:  # ИСПРАВЛЕНО
+    if call.from_user.id in ADMIN_IDS:
         await bot.send_message(deal[1], f"❌ Сделка отменена гарантом\nID: {deal_id}")
     else:
         for admin_id in ADMIN_IDS:
@@ -274,7 +300,7 @@ async def cancel_deal(call: CallbackQuery):
 
 @dp.callback_query(F.data == "deals")
 async def show_deals(call: CallbackQuery):
-    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+    if call.from_user.id not in ADMIN_IDS:
         return await call.answer("❌ Нет доступа", show_alert=True)
     deals = get_deals()
     txt = "📋 **Все сделки**\n"
@@ -377,16 +403,15 @@ async def w_wallet(call: CallbackQuery, state: FSMContext):
 # ==================== АДМИН ====================
 @dp.callback_query(F.data == "admin")
 async def admin_menu(call: CallbackQuery):
-    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+    if call.from_user.id not in ADMIN_IDS:
         return await call.answer("❌ Нет доступа", show_alert=True)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Юзеры", callback_data="a_users")],
-        [InlineKeyboardButton(text="💰 Накрутка", callback_data="a_balance")],
-        [InlineKeyboardButton(text="📋 Выводы", callback_data="a_withdraws")],
-        [InlineKeyboardButton(text="📊 Стата", callback_data="a_stats")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
-    ])
-    await call.message.edit_text("⚙️ Админка:", reply_markup=kb)
+    await call.message.edit_text(
+        "⚙️ **Админ-панель**\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "Выберите действие:",
+        parse_mode="Markdown",
+        reply_markup=kb_admin_panel()
+    )
 
 @dp.callback_query(F.data == "a_users")
 async def a_users(call: CallbackQuery):
