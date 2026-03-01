@@ -359,7 +359,7 @@ async def admin_menu(call: CallbackQuery):
         [InlineKeyboardButton(text="📊 Стата", callback_data="a_stats")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
     ])
-    await call.message.edit_text("⚙️ Админка:", reply_markup=kb)
+    await call.message.edit_text("⚙️ Админка для Костяна:", reply_markup=kb)
 
 @dp.callback_query(F.data == "a_users")
 async def a_users(call: CallbackQuery):
