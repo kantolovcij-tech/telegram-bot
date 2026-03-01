@@ -33,7 +33,6 @@ class PingHandler(BaseHTTPRequestHandler):
         self.wfile.write(f"Bot is alive! Server time: {datetime.now()}".encode())
         
 def run_web_server():
-    """Запускает веб-сервер на порту 10000 для пингов от Render"""
     try:
         server = HTTPServer(('0.0.0.0', 10000), PingHandler)
         print(f"✅ Веб-сервер запущен на порту 10000 в {datetime.now().strftime('%H:%M:%S')}")
@@ -41,13 +40,10 @@ def run_web_server():
     except Exception as e:
         print(f"❌ Ошибка веб-сервера: {e}")
 
-# Запускаем веб-сервер в отдельном потоке
 threading.Thread(target=run_web_server, daemon=True).start()
 
-# Функция для пинга самого себя (каждые 5 минут)
 def self_ping():
-    """Каждые 5 минут пингует свой URL, чтобы Render не усыпил бота"""
-    time.sleep(30)  # Даем время серверу запуститься
+    time.sleep(30)
     while True:
         try:
             response = requests.get(RENDER_URL, timeout=30)
@@ -56,7 +52,7 @@ def self_ping():
         except Exception as e:
             now = datetime.now().strftime('%H:%M:%S')
             print(f"❌ Ошибка само-пинга в {now}: {e}")
-        time.sleep(300)  # 5 минут
+        time.sleep(300)
 
 threading.Thread(target=self_ping, daemon=True).start()
 # ===============================================================
@@ -66,20 +62,37 @@ def init_db():
     with sqlite3.connect('data.db') as conn:
         conn.executescript('''
             CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY, username TEXT, 
+                user_id INTEGER PRIMARY KEY, 
+                username TEXT, 
                 balance_usd REAL DEFAULT 0,
                 balance_rub REAL DEFAULT 0,
                 balance_ton REAL DEFAULT 0,
                 balance_stars REAL DEFAULT 0,
-                card TEXT, wallet TEXT, verified INTEGER DEFAULT 0, deals INTEGER DEFAULT 0
+                card TEXT, 
+                wallet TEXT, 
+                verified INTEGER DEFAULT 0, 
+                deals INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS deals (
-                deal_id TEXT PRIMARY KEY, seller_id INTEGER, seller_name TEXT,
-                buyer TEXT, item TEXT, amount REAL, currency TEXT, status TEXT, created TEXT
+                deal_id TEXT PRIMARY KEY, 
+                seller_id INTEGER, 
+                seller_name TEXT,
+                buyer TEXT, 
+                item TEXT, 
+                amount REAL, 
+                currency TEXT, 
+                status TEXT, 
+                created TEXT
             );
             CREATE TABLE IF NOT EXISTS withdraws (
-                req_id TEXT PRIMARY KEY, user_id INTEGER, amount REAL, currency TEXT,
-                method TEXT, details TEXT, status TEXT, date TEXT
+                req_id TEXT PRIMARY KEY, 
+                user_id INTEGER, 
+                amount REAL, 
+                currency TEXT,
+                method TEXT, 
+                details TEXT, 
+                status TEXT, 
+                date TEXT
             );
         ''')
 init_db()
@@ -100,7 +113,6 @@ def create_user(user_id, username):
     db_exec("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
 
 def update_balance(user_id, currency, amount):
-    """Обновление баланса в указанной валюте"""
     col_map = {
         "USD": "balance_usd",
         "RUB": "balance_rub", 
@@ -112,7 +124,6 @@ def update_balance(user_id, currency, amount):
         db_exec(f"UPDATE users SET {col} = {col} + ? WHERE user_id=?", (amount, user_id))
 
 def get_balance_text(user):
-    """Возвращает текст со всеми балансами"""
     return (f"💰 <b>ВАШ БАЛАНС</b>\n━━━━━━━━━━━━━━━━\n"
             f"🇺🇸 USD: <b>${user[2]:.2f}</b>\n"
             f"🇷🇺 RUB: <b>₽{user[3]:.2f}</b>\n"
@@ -155,6 +166,17 @@ def get_withdraws(status="pending"):
 def update_withdraw(req_id, status):
     db_exec("UPDATE withdraws SET status=? WHERE req_id=?", (status, req_id))
 
+def get_user_balance_by_id(user_id):
+    """Получить баланс пользователя по ID для админа"""
+    user = get_user(user_id)
+    if user:
+        return (f"👤 <b>ПОЛЬЗОВАТЕЛЬ {user_id}</b>\n━━━━━━━━━━━━━━━━\n"
+                f"🇺🇸 USD: <b>${user[2]:.2f}</b>\n"
+                f"🇷🇺 RUB: <b>₽{user[3]:.2f}</b>\n"
+                f"💎 TON: <b>{user[4]:.2f} TON</b>\n"
+                f"⭐ STARS: <b>{user[5]:.0f} ⭐</b>")
+    return "❌ Пользователь не найден"
+
 # ==================== СОСТОЯНИЯ ====================
 class States:
     class Seller(StatesGroup):
@@ -162,16 +184,21 @@ class States:
         item = State()
         amount = State()
         currency = State()
+    
     class Withdraw(StatesGroup):
         amount = State()
         currency = State()
         card = State()
         holder = State()
         wallet = State()
+    
     class Admin(StatesGroup):
         user_id = State()
         amount = State()
         currency = State()
+    
+    class AdminCheckBalance(StatesGroup):
+        user_id = State()
 
 # ==================== КЛАВИАТУРЫ ====================
 def kb_main(uid):
@@ -197,18 +224,18 @@ def kb_main(uid):
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def kb_currency():
-    """Клавиатура выбора валюты"""
+def kb_currency(action="sell"):
+    """Клавиатура выбора валюты с разными callback_data"""
+    prefix = "cur_" if action == "sell" else "admin_cur_"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🇺🇸 ДОЛЛАР (USD)", callback_data="cur_usd")],
-        [InlineKeyboardButton(text="🇷🇺 РУБЛЬ (RUB)", callback_data="cur_rub")],
-        [InlineKeyboardButton(text="💎 TON", callback_data="cur_ton")],
-        [InlineKeyboardButton(text="⭐ ЗВЕЗДЫ (STARS)", callback_data="cur_stars")],
+        [InlineKeyboardButton(text="🇺🇸 ДОЛЛАР (USD)", callback_data=f"{prefix}usd")],
+        [InlineKeyboardButton(text="🇷🇺 РУБЛЬ (RUB)", callback_data=f"{prefix}rub")],
+        [InlineKeyboardButton(text="💎 TON", callback_data=f"{prefix}ton")],
+        [InlineKeyboardButton(text="⭐ ЗВЕЗДЫ (STARS)", callback_data=f"{prefix}stars")],
         [InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back")]
     ])
 
 def kb_withdraw_currency(balances):
-    """Клавиатура выбора валюты для вывода (только с положительным балансом)"""
     buttons = []
     if balances[2] > 0:
         buttons.append([InlineKeyboardButton(text=f"🇺🇸 ДОЛЛАР (${balances[2]:.2f})", callback_data="wcur_usd")])
@@ -249,6 +276,7 @@ def kb_admin_panel():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 ПОЛЬЗОВАТЕЛИ", callback_data="a_users")],
         [InlineKeyboardButton(text="💰 НАКРУТКА", callback_data="a_balance")],
+        [InlineKeyboardButton(text="🔍 ПОКАЗАТЬ БАЛАНС", callback_data="a_show_balance")],
         [InlineKeyboardButton(text="📋 ЗАЯВКИ", callback_data="a_withdraws")],
         [InlineKeyboardButton(text="📊 СТАТИСТИКА", callback_data="a_stats")],
         [InlineKeyboardButton(text="◀️ ГЛАВНОЕ", callback_data="back")]
@@ -321,7 +349,7 @@ async def sell_buyer(msg: Message, state: FSMContext):
 @dp.message(States.Seller.item)
 async def sell_item(msg: Message, state: FSMContext):
     await state.update_data(item=msg.text)
-    await msg.answer("💰 Выберите валюту:", reply_markup=kb_currency())
+    await msg.answer("💰 Выберите валюту:", reply_markup=kb_currency("sell"))
     await state.set_state(States.Seller.currency)
 
 @dp.callback_query(F.data.startswith("cur_"))
@@ -375,7 +403,6 @@ async def sell_amount(msg: Message, state: FSMContext):
             reply_markup=kb_main(msg.from_user.id)
         )
         
-        # Уведомление админам
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(
@@ -669,11 +696,9 @@ async def withdraw_amount(msg: Message, state: FSMContext):
         
         await state.update_data(amount=amount)
         
-        # Списываем баланс
         update_balance(msg.from_user.id, data['currency'], -amount)
         
-        # Создаем заявку
-        if u[6]:  # карта
+        if u[6]:
             req_id = create_withdraw(
                 msg.from_user.id, 
                 amount, 
@@ -682,7 +707,7 @@ async def withdraw_amount(msg: Message, state: FSMContext):
                 f"{u[6][:4]}****{u[6][-4:]}"
             )
             method_text = f"💳 Карта: {u[6][:4]}****{u[6][-4:]}"
-        else:  # кошелек
+        else:
             req_id = create_withdraw(
                 msg.from_user.id, 
                 amount, 
@@ -737,6 +762,46 @@ async def a_users(call: CallbackQuery):
     
     await call.message.edit_text(txt, parse_mode="HTML", reply_markup=kb_back())
 
+# ==================== НОВАЯ ФУНКЦИЯ: ПОКАЗ БАЛАНСА ПО ID ====================
+@dp.callback_query(F.data == "a_show_balance")
+async def a_show_balance_start(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    
+    await call.message.edit_text(
+        "🔍 <b>ПОКАЗАТЬ БАЛАНС</b>\n━━━━━━━━━━━━━━━━\n"
+        "Введите ID пользователя:",
+        parse_mode="HTML"
+    )
+    await state.set_state(States.AdminCheckBalance.user_id)
+    await call.answer()
+
+@dp.message(States.AdminCheckBalance.user_id)
+async def a_show_balance_result(msg: Message, state: FSMContext):
+    try:
+        user_id = int(msg.text)
+        user = get_user(user_id)
+        
+        if user:
+            result = (f"🔍 <b>БАЛАНС ПОЛЬЗОВАТЕЛЯ {user_id}</b>\n━━━━━━━━━━━━━━━━\n"
+                     f"👤 Username: @{user[1] or 'Нет'}\n"
+                     f"━━━━━━━━━━━━━━━━\n"
+                     f"🇺🇸 USD: <b>${user[2]:.2f}</b>\n"
+                     f"🇷🇺 RUB: <b>₽{user[3]:.2f}</b>\n"
+                     f"💎 TON: <b>{user[4]:.2f} TON</b>\n"
+                     f"⭐ STARS: <b>{user[5]:.0f} ⭐</b>\n"
+                     f"━━━━━━━━━━━━━━━━\n"
+                     f"💳 Карта: {'✅' if user[6] else '❌'}\n"
+                     f"₿ Кошелек: {'✅' if user[7] else '❌'}")
+        else:
+            result = f"❌ Пользователь с ID {user_id} не найден"
+        
+        await msg.answer(result, parse_mode="HTML", reply_markup=kb_main(msg.from_user.id))
+        await state.clear()
+    except ValueError:
+        await msg.answer("❌ Введите корректный ID (число)")
+
+# ==================== НАКРУТКА БАЛАНСА (ИСПРАВЛЕНО) ====================
 @dp.callback_query(F.data == "a_balance")
 async def a_balance_start(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMIN_IDS:
@@ -763,20 +828,20 @@ async def a_balance_user(msg: Message, state: FSMContext):
         
         await state.update_data(uid=uid)
         await msg.answer(
-            "Выберите валюту:",
-            reply_markup=kb_currency()
+            "💰 Выберите валюту для накрутки:",
+            reply_markup=kb_currency("admin")  # Используем admin_cur_ префикс
         )
         await state.set_state(States.Admin.currency)
     except ValueError:
         await msg.answer("❌ Введите ID")
 
-@dp.callback_query(States.Admin.currency, F.data.startswith("cur_"))
+@dp.callback_query(States.Admin.currency, F.data.startswith("admin_cur_"))
 async def a_balance_currency(call: CallbackQuery, state: FSMContext):
     currency_map = {
-        "cur_usd": "USD",
-        "cur_rub": "RUB",
-        "cur_ton": "TON",
-        "cur_stars": "STARS"
+        "admin_cur_usd": "USD",
+        "admin_cur_rub": "RUB",
+        "admin_cur_ton": "TON",
+        "admin_cur_stars": "STARS"
     }
     currency = currency_map.get(call.data)
     if not currency:
@@ -787,7 +852,7 @@ async def a_balance_currency(call: CallbackQuery, state: FSMContext):
     currency_symbols = {"USD":"$", "RUB":"₽", "TON":"💎", "STARS":"⭐"}
     symbol = currency_symbols.get(currency, "")
     
-    await call.message.edit_text(f"Введите сумму в {currency} {symbol}:")
+    await call.message.edit_text(f"💰 Введите сумму в {currency} {symbol}:")
     await state.set_state(States.Admin.amount)
     await call.answer()
 
@@ -796,6 +861,10 @@ async def a_balance_amount(msg: Message, state: FSMContext):
     try:
         amount = float(msg.text)
         data = await state.get_data()
+        
+        if amount <= 0:
+            await msg.answer("❌ Сумма должна быть больше 0")
+            return
         
         update_balance(data['uid'], data['currency'], amount)
         
@@ -812,10 +881,15 @@ async def a_balance_amount(msg: Message, state: FSMContext):
         except:
             pass
         
+        # Показываем обновленный баланс
+        user = get_user(data['uid'])
+        balance_text = get_balance_text(user)
+        
         await msg.answer(
             f"✅ <b>ГОТОВО!</b>\n━━━━━━━━━━━━━━━━\n"
             f"👤 Пользователь: {data['uid']}\n"
-            f"💰 Сумма: {symbol}{amount:.2f} {data['currency']}",
+            f"💰 Начислено: {symbol}{amount:.2f} {data['currency']}\n\n"
+            f"{balance_text}",
             parse_mode="HTML",
             reply_markup=kb_main(msg.from_user.id)
         )
@@ -824,6 +898,7 @@ async def a_balance_amount(msg: Message, state: FSMContext):
     except ValueError:
         await msg.answer("❌ Введите число")
 
+# ==================== ЗАЯВКИ НА ВЫВОД ====================
 @dp.callback_query(F.data == "a_withdraws")
 async def a_withdraws(call: CallbackQuery):
     if call.from_user.id not in ADMIN_IDS:
@@ -887,6 +962,7 @@ async def a_approve_all(call: CallbackQuery):
     )
     await call.answer()
 
+# ==================== СТАТИСТИКА ====================
 @dp.callback_query(F.data == "a_stats")
 async def a_stats(call: CallbackQuery):
     if call.from_user.id not in ADMIN_IDS:
