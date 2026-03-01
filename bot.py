@@ -1,4 +1,22 @@
 import asyncio, logging, sqlite3, uuid
+# ============ ВЕБ-СЕРВЕР ДЛЯ UPTIMEROBOT ============
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class PingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+        
+def run_web_server():
+    server = HTTPServer(('0.0.0.0', 10000), PingHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print("✅ Веб-сервер для пингов запущен на порту 10000")
+
+# Запускаем веб-сервер
+run_web_server()
+# ===================================================
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
