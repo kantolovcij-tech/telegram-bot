@@ -248,7 +248,7 @@ async def pay_deal(call: CallbackQuery):
     if not deal: return await call.answer("❌ Нет сделки", show_alert=True)
     update_deal(deal_id, "paid")
     await call.message.edit_text(f"✅ Оплата подтверждена\nID: {deal_id}", reply_markup=kb_main(call.from_user.id))
-    await bot.send_message(deal[1], f"💰 Оплата получена!\nID: {deal_id}\nОтправьте товар и нажмите кнопку:", 
+    await bot.send_message(deal[1], f"💰 Оплата получена!\nID: {deal_id}\nОтправьте товар (строго менеджеру) @LolzTeamsSupport и нажмите кнопку:", 
                           reply_markup=kb_deal(deal_id, "paid", "seller"))
     await call.answer()
 
