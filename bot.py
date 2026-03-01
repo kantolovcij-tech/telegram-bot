@@ -1,22 +1,10 @@
-import asyncio, logging, sqlite3, uuid
-# ============ ВЕБ-СЕРВЕР ДЛЯ UPTIMEROBOT ============
+import asyncio
+import logging
+import sqlite3
+import uuid
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class PingHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-        
-def run_web_server():
-    server = HTTPServer(('0.0.0.0', 10000), PingHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print("✅ Веб-сервер для пингов запущен на порту 10000")
-
-# Запускаем веб-сервер
-run_web_server()
-# ===================================================
+import time
+import requests
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -26,13 +14,31 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ==================== НАСТРОЙКИ ====================
-BOT_TOKEN = "8277031430:AAFKsKJ4e8wsR-Sp6pK9pIHCrrSvchfnhh8"
-ADMIN_ID = 5979001063  # Ваш ID (и админ и покупатель)
+BOT_TOKEN = "8512473902:AAEjXmCgzsZ6ikZG0js2lwh_NRnDJwUuSMM"
+ADMIN_IDS = [7654091786, 8259572484]  # Два админа
 # ===================================================
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 logging.basicConfig(level=logging.INFO)
+
+# ==================== ФУНКЦИЯ АВТОПИНГА ====================
+def keep_alive():
+    """Каждые 5 минут будит самого себя"""
+    RENDER_URL = "https://telegram-bot-phe1.onrender.com"
+    
+    while True:
+        try:
+            response = requests.get(RENDER_URL, timeout=30)
+            now = datetime.now().strftime("%H:%M:%S")
+            print(f"[KeepAlive] Пинг в {now} | Статус: {response.status_code}")
+        except Exception as e:
+            now = datetime.now().strftime("%H:%M:%S")
+            print(f"[KeepAlive] Ошибка: {e}")
+        time.sleep(300)
+
+threading.Thread(target=keep_alive, daemon=True).start()
+# =========================================================
 
 # ==================== БАЗА ДАННЫХ ====================
 def init_db():
@@ -121,7 +127,7 @@ def kb_main(uid):
     user = get_user(uid)
     bal = f"💰 ${user[2]:.2f}" if user else "💰 Баланс"
     btns = []
-    if uid == ADMIN_ID:
+    if uid in ADMIN_IDS:  # ИСПРАВЛЕНО: теперь проверка через список
         btns = [[InlineKeyboardButton(text="📋 Сделки", callback_data="deals")],
                 [InlineKeyboardButton(text=bal, callback_data="balance")],
                 [InlineKeyboardButton(text="⚙️ Админ", callback_data="admin")]]
@@ -151,7 +157,8 @@ def kb_back():
 @dp.message(CommandStart())
 async def start(msg: Message):
     create_user(msg.from_user.id, msg.from_user.username or "no_name")
-    await msg.answer(f"👋 Добро пожаловать{' Админ' if msg.from_user.id==ADMIN_ID else ''}!", reply_markup=kb_main(msg.from_user.id))
+    is_admin = " Админ" if msg.from_user.id in ADMIN_IDS else ""  # ИСПРАВЛЕНО
+    await msg.answer(f"👋 Добро пожаловать{is_admin}!", reply_markup=kb_main(msg.from_user.id))
 
 @dp.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
@@ -195,20 +202,26 @@ async def sell_amount(msg: Message, state: FSMContext):
         data = await state.get_data()
         deal_id = create_deal(msg.from_user.id, msg.from_user.username, data['buyer'], data['item'], float(msg.text))
         await msg.answer(f"✅ Сделка {deal_id} создана", reply_markup=kb_main(msg.from_user.id))
-        await bot.send_message(ADMIN_ID, f"🆕 Новая сделка!\nID: `{deal_id}`\nТовар: {data['item']}\nСумма: ${msg.text}\nПродавец: @{msg.from_user.username}\nПокупатель: {data['buyer']}", 
-                               parse_mode="Markdown", reply_markup=kb_deal(deal_id, "waiting", "buyer"))
+        # Отправляем всем админам
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, f"🆕 Новая сделка!\nID: `{deal_id}`\nТовар: {data['item']}\nСумма: ${msg.text}\nПродавец: @{msg.from_user.username}\nПокупатель: {data['buyer']}", 
+                                    parse_mode="Markdown", reply_markup=kb_deal(deal_id, "waiting", "buyer"))
+            except: pass
         await state.clear()
     except:
         await msg.answer("❌ Ошибка")
 
-# ==================== ПОКУПАТЕЛЬ (АДМИН) ====================
+# ==================== ПОКУПАТЕЛЬ (АДМИНЫ) ====================
 @dp.callback_query(F.data.startswith("pay_"))
 async def pay_deal(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+        return await call.answer("❌ Нет доступа", show_alert=True)
     deal_id = call.data[4:]
     deal = get_deal(deal_id)
     if not deal: return await call.answer("❌ Нет сделки", show_alert=True)
     update_deal(deal_id, "paid")
-    await call.message.edit_text(f"✅ Оплата подтверждена\nID: {deal_id}", reply_markup=kb_main(ADMIN_ID))
+    await call.message.edit_text(f"✅ Оплата подтверждена\nID: {deal_id}", reply_markup=kb_main(call.from_user.id))
     await bot.send_message(deal[1], f"💰 Оплата получена!\nID: {deal_id}\nОтправьте товар и нажмите кнопку:", 
                           reply_markup=kb_deal(deal_id, "paid", "seller"))
     await call.answer()
@@ -220,18 +233,24 @@ async def send_deal(call: CallbackQuery):
     if not deal or call.from_user.id != deal[1]: return await call.answer("❌ Ошибка", show_alert=True)
     update_deal(deal_id, "sent")
     await call.message.edit_text(f"📦 Товар отправлен\nID: {deal_id}", reply_markup=kb_main(deal[1]))
-    await bot.send_message(ADMIN_ID, f"📦 Товар отправлен!\nID: {deal_id}\nПодтвердите получение:", 
-                          reply_markup=kb_deal(deal_id, "sent", "buyer"))
+    # Отправляем всем админам
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"📦 Товар отправлен!\nID: {deal_id}\nПодтвердите получение:", 
+                                  reply_markup=kb_deal(deal_id, "sent", "buyer"))
+        except: pass
     await call.answer()
 
 @dp.callback_query(F.data.startswith("done_"))
 async def done_deal(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+        return await call.answer("❌ Нет доступа", show_alert=True)
     deal_id = call.data[5:]
     deal = get_deal(deal_id)
     if not deal: return await call.answer("❌ Ошибка", show_alert=True)
     update_deal(deal_id, "done")
     update_balance(deal[1], deal[5])
-    await call.message.edit_text(f"🎉 Сделка завершена!\nID: {deal_id}", reply_markup=kb_main(ADMIN_ID))
+    await call.message.edit_text(f"🎉 Сделка завершена!\nID: {deal_id}", reply_markup=kb_main(call.from_user.id))
     await bot.send_message(deal[1], f"✅ Деньги зачислены!\nID: {deal_id}\nСумма: ${deal[5]}", reply_markup=kb_main(deal[1]))
     await call.answer()
 
@@ -240,17 +259,23 @@ async def cancel_deal(call: CallbackQuery):
     deal_id = call.data[7:]
     deal = get_deal(deal_id)
     if not deal: return await call.answer("❌ Ошибка", show_alert=True)
-    if call.from_user.id != deal[1] and call.from_user.id != ADMIN_ID: return
+    if call.from_user.id != deal[1] and call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+        return
     update_deal(deal_id, "cancelled")
     await call.message.edit_text(f"❌ Сделка отменена\nID: {deal_id}", reply_markup=kb_main(call.from_user.id))
-    if call.from_user.id == ADMIN_ID:
+    if call.from_user.id in ADMIN_IDS:  # ИСПРАВЛЕНО
         await bot.send_message(deal[1], f"❌ Сделка отменена гарантом\nID: {deal_id}")
     else:
-        await bot.send_message(ADMIN_ID, f"❌ Сделка отменена продавцом\nID: {deal_id}")
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, f"❌ Сделка отменена продавцом\nID: {deal_id}")
+            except: pass
     await call.answer()
 
 @dp.callback_query(F.data == "deals")
 async def show_deals(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+        return await call.answer("❌ Нет доступа", show_alert=True)
     deals = get_deals()
     txt = "📋 **Все сделки**\n"
     for d in deals[:10]:
@@ -352,6 +377,8 @@ async def w_wallet(call: CallbackQuery, state: FSMContext):
 # ==================== АДМИН ====================
 @dp.callback_query(F.data == "admin")
 async def admin_menu(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:  # ИСПРАВЛЕНО
+        return await call.answer("❌ Нет доступа", show_alert=True)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Юзеры", callback_data="a_users")],
         [InlineKeyboardButton(text="💰 Накрутка", callback_data="a_balance")],
@@ -359,10 +386,11 @@ async def admin_menu(call: CallbackQuery):
         [InlineKeyboardButton(text="📊 Стата", callback_data="a_stats")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
     ])
-    await call.message.edit_text("⚙️ Админка для Костяна:", reply_markup=kb)
+    await call.message.edit_text("⚙️ Админка:", reply_markup=kb)
 
 @dp.callback_query(F.data == "a_users")
 async def a_users(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS: return
     users = db_exec("SELECT user_id, username, balance, verified FROM users LIMIT 20")
     txt = "👥 **Пользователи**\n"
     for u in users:
@@ -371,6 +399,7 @@ async def a_users(call: CallbackQuery):
 
 @dp.callback_query(F.data == "a_balance")
 async def a_balance_start(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id not in ADMIN_IDS: return
     await call.message.edit_text("Введите ID пользователя:")
     await state.set_state(States.Admin.user_id)
     await call.answer()
@@ -392,7 +421,7 @@ async def a_balance_amount(msg: Message, state: FSMContext):
         am = float(msg.text)
         data = await state.get_data()
         update_balance(data['uid'], am)
-        await msg.answer(f"✅ Начислено ${am}", reply_markup=kb_main(ADMIN_ID))
+        await msg.answer(f"✅ Начислено ${am}", reply_markup=kb_main(msg.from_user.id))
         await bot.send_message(data['uid'], f"🎉 Вам начислено ${am}!")
         await state.clear()
     except:
@@ -400,6 +429,7 @@ async def a_balance_amount(msg: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "a_withdraws")
 async def a_withdraws(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS: return
     w = get_withdraws()
     if not w:
         await call.message.edit_text("❌ Нет заявок", reply_markup=kb_back())
@@ -415,15 +445,17 @@ async def a_withdraws(call: CallbackQuery):
 
 @dp.callback_query(F.data == "a_approve_all")
 async def a_approve_all(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS: return
     for w in get_withdraws():
         update_withdraw(w[0], "done")
         try:
             await bot.send_message(w[1], f"✅ Вывод ${w[2]} выполнен!")
         except: pass
-    await call.message.edit_text("✅ Все заявки обработаны", reply_markup=kb_main(ADMIN_ID))
+    await call.message.edit_text("✅ Все заявки обработаны", reply_markup=kb_main(call.from_user.id))
 
 @dp.callback_query(F.data == "a_stats")
 async def a_stats(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS: return
     users = db_exec("SELECT COUNT(*) FROM users")[0][0]
     balance = db_exec("SELECT SUM(balance) FROM users")[0][0] or 0
     deals = db_exec("SELECT COUNT(*) FROM deals")[0][0]
