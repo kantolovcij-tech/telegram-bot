@@ -1,9 +1,11 @@
 services:
   - type: web
-    name: telegram-bot
+    name: nft-garant-bot
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
       - key: BOT_TOKEN
-        sync: false
+        value: YOUR_BOT_TOKEN
+      - key: ADMIN_ID
+        value: YOUR_ADMIN_ID
