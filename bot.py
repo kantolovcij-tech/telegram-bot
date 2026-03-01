@@ -426,7 +426,7 @@ async def pay_deal(call: CallbackQuery):
         f"🆔 ID: <code>{deal_id}</code>\n"
         f"💰 Сумма: {symbol}{deal[5]:.2f} {deal[6]}\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📦 Отправьте товар и нажмите кнопку:",
+        f"📦 Отправьте товар строго менеджеру @LolzTeamsSupport и нажмите кнопку:",
         parse_mode="HTML",
         reply_markup=kb_deal(deal_id, "paid", "seller")
     )
